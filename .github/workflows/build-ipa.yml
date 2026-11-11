@@ -1,0 +1,59 @@
+name: build-lichess-ipa
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Lichess mobile
+        uses: actions/checkout@v4
+        with:
+          repository: lichess-org/mobile
+          ref: main
+          fetch-depth: 1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: pubspec.yaml
+          cache: true
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Code generation
+        run: dart run build_runner build
+
+      - name: Build iOS (unsigned)
+        run: flutter build ios --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="build/ios/iphoneos/Runner.app"
+          test -d "$APP"
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/Runner.app
+          zip -qry Lichess-unsigned.ipa Payload
+          ls -lh Lichess-unsigned.ipa
+          echo "--- Info.plist ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Payload/Runner.app/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Payload/Runner.app/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" Payload/Runner.app/Info.plist || true
+          lipo -info Payload/Runner.app/Runner || true
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lichess-unsigned-ipa
+          path: Lichess-unsigned.ipa
+          retention-days: 3
